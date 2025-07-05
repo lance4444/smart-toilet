@@ -136,6 +136,29 @@ function isAdmin(req) {
   return session && session.role === "admin";
 }
 
+// 中間件添加 cookie 解析
+app.use((req, res, next) => {
+  req.cookies = {};
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    cookieHeader.split(';').forEach(cookie => {
+      const parts = cookie.trim().split('=');
+      req.cookies[parts[0]] = parts[1];
+    });
+  }
+  next();
+});
+
+// 設置 cookie 輔助函數
+function setCookie(res, name, value, options = {}) {
+  let cookieString = `${name}=${value}`;
+  if (options.maxAge) cookieString += `; Max-Age=${options.maxAge}`;
+  if (options.httpOnly) cookieString += `; HttpOnly`;
+  if (options.secure) cookieString += `; Secure`;
+  if (options.sameSite) cookieString += `; SameSite=${options.sameSite}`;
+  res.setHeader('Set-Cookie', cookieString);
+}
+
 // 定期更新占用狀態
 setInterval(() => {
   toiletStatus.updateOccupancy();
@@ -173,10 +196,12 @@ app.post('/login', (req, res) => {
   const sessionToken = authenticateUser(username, password);
   
   if (sessionToken) {
-    res.cookie('session', sessionToken);
-    res.redirect('/');
+    setCookie(res, 'session', sessionToken, { maxAge: 86400 }); // 24小時
+    res.writeHead(302, { 'Location': '/' });
+    res.end();
   } else {
-    res.redirect('/login?error=Invalid credentials! Please try again.');
+    res.writeHead(302, { 'Location': '/login?error=Invalid credentials! Please try again.' });
+    res.end();
   }
 });
 
@@ -186,8 +211,9 @@ app.get('/logout', (req, res) => {
   if (sessionToken) {
     delete sessions[sessionToken];
   }
-  res.clearCookie('session');
-  res.redirect('/login');
+  setCookie(res, 'session', '', { maxAge: 0 });
+  res.writeHead(302, { 'Location': '/login' });
+  res.end();
 });
 
 // 主頁面
@@ -291,6 +317,17 @@ app.get('/cloud', (req, res) => {
   }
   
   res.send(getCloudHTML());
+});
+
+// 健康檢查端點
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    toiletStatus: toiletStatus.getStatusSummary()
+  });
 });
 
 // HTML生成函數
@@ -577,7 +614,6 @@ function getMainHTML(session) {
     </div>
 
     <script>
-        // 與ESP32版本完全相同的JavaScript代碼
         function updateStatus() {
             fetch('/status')
                 .then(response => {
@@ -726,11 +762,11 @@ function getMainHTML(session) {
         updateStatus();
     </script>
 </body>
-</html>\`;
+</html>`;
 }
 
 function getWiFiHTML() {
-  return \`
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -786,17 +822,17 @@ function getWiFiHTML() {
         <p><strong>Status:</strong> Online (Cloud Server)</p>
         <p><strong>Platform:</strong> Render Cloud Platform</p>
         <p><strong>Server Type:</strong> Node.js Express</p>
-        <p><strong>URL:</strong> \${process.env.RENDER_EXTERNAL_URL || 'https://your-app.onrender.com'}</p>
-        <p><strong>Port:</strong> \${PORT}</p>
-        <p><strong>Uptime:</strong> \${Math.floor(process.uptime())} seconds</p>
+        <p><strong>URL:</strong> ${process.env.RENDER_EXTERNAL_URL || 'https://your-app.onrender.com'}</p>
+        <p><strong>Port:</strong> ${PORT}</p>
+        <p><strong>Uptime:</strong> ${Math.floor(process.uptime())} seconds</p>
         <a href='/'>🔙 Back to Main</a>
     </div>
 </body>
-</html>\`;
+</html>`;
 }
 
 function getCloudHTML() {
-  return \`
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -865,11 +901,11 @@ function getCloudHTML() {
         </div>
         
         <div class="info">
-            <p><strong>Server URL:</strong> \${process.env.RENDER_EXTERNAL_URL || 'https://your-app.onrender.com'}</p>
+            <p><strong>Server URL:</strong> ${process.env.RENDER_EXTERNAL_URL || 'https://your-app.onrender.com'}</p>
             <p><strong>Platform:</strong> Render Cloud</p>
             <p><strong>Runtime:</strong> Node.js Express</p>
             <p><strong>Status:</strong> Running</p>
-            <p><strong>Uptime:</strong> \${Math.floor(process.uptime())} seconds</p>
+            <p><strong>Uptime:</strong> ${Math.floor(process.uptime())} seconds</p>
             <p><strong>Data Storage:</strong> In-Memory (Real-time)</p>
         </div>
         
@@ -878,68 +914,8 @@ function getCloudHTML() {
         </div>
     </div>
 </body>
-</html>\`;
+</html>`;
 }
-
-// 中間件添加 cookie 解析
-app.use((req, res, next) => {
-  req.cookies = {};
-  const cookieHeader = req.headers.cookie;
-  if (cookieHeader) {
-    cookieHeader.split(';').forEach(cookie => {
-      const parts = cookie.trim().split('=');
-      req.cookies[parts[0]] = parts[1];
-    });
-  }
-  next();
-});
-
-// 設置 cookie 輔助函數
-function setCookie(res, name, value, options = {}) {
-  let cookieString = \`\${name}=\${value}\`;
-  if (options.maxAge) cookieString += \`; Max-Age=\${options.maxAge}\`;
-  if (options.httpOnly) cookieString += \`; HttpOnly\`;
-  if (options.secure) cookieString += \`; Secure\`;
-  if (options.sameSite) cookieString += \`; SameSite=\${options.sameSite}\`;
-  res.setHeader('Set-Cookie', cookieString);
-}
-
-// 更新登入處理以設置 cookie
-app.post('/login', (req, res) => {
-  const { username, password } = req.body;
-  const sessionToken = authenticateUser(username, password);
-  
-  if (sessionToken) {
-    setCookie(res, 'session', sessionToken, { maxAge: 86400 }); // 24小時
-    res.writeHead(302, { 'Location': '/' });
-    res.end();
-  } else {
-    res.writeHead(302, { 'Location': '/login?error=Invalid credentials! Please try again.' });
-    res.end();
-  }
-});
-
-// 更新登出處理
-app.get('/logout', (req, res) => {
-  const sessionToken = req.cookies?.session;
-  if (sessionToken) {
-    delete sessions[sessionToken];
-  }
-  setCookie(res, 'session', '', { maxAge: 0 });
-  res.writeHead(302, { 'Location': '/login' });
-  res.end();
-});
-
-// 健康檢查端點
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    toiletStatus: toiletStatus.getStatusSummary()
-  });
-});
 
 // 錯誤處理中間件
 app.use((err, req, res, next) => {
@@ -957,11 +933,11 @@ app.use((req, res) => {
 
 // 啟動服務器
 app.listen(PORT, () => {
-  console.log(\`
+  console.log(`
 🚽 Smart Toilet Cloud Server Started!
 =====================================
-🌐 Server URL: http://localhost:\${PORT}
-🎯 Environment: \${process.env.NODE_ENV || 'development'}
+🌐 Server URL: http://localhost:${PORT}
+🎯 Environment: ${process.env.NODE_ENV || 'development'}
 📡 API Endpoint: /api/sensor-data
 🔑 Login Page: /login
 📊 Health Check: /health
@@ -971,7 +947,7 @@ Demo Accounts:
 👤 User: user / 12345
 
 Ready to receive data from ESP32! 🚀
-\`);
+`);
 });
 
 // 優雅關閉
